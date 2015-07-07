@@ -1,0 +1,106 @@
+= Tomcat requestURI Quirk?
+
+== Run the Working Example
+
+Clone the example and run on the latest Tomcat 8 using:
+
+----
+$ mvn clean package cargo:run
+----
+
+* Open http://localhost:8080/context
+
++
+
+NOTE: There is no trailing `/`
+
+* Press the *Sign In* button
+* The Hello page is displayed
+
+== Mapping to `/*`
+
+Switch to the `slash-star` branch which maps the `DispatcherServlet` to `/*` instead of `/`.
+Repeat the steps from above:
+
+
+----
+$ mvn clean package cargo:run
+----
+
+* Open http://localhost:8080/context
+
++
+
+NOTE: There is no trailing `/`
+
+* Press the *Sign In* button
+* The Log In page is displayed.
+
+The reason is:
+
+
+* When a user requests `/context` the `SecurityFilter` saves the current request in `HttpSession` using `HttpServletRequest.getReqeustURL()`.
+The value is `http://localhost:8080/context`
+* The user is then sent to the Log In Page
+* After a user authenticates successfully, the `SecurityFilter` sends the user to the originally requested URL that was saved in `HttpSession`
+* A redirect is sent to `http://localhost:8080/context` for the request URL of `http://localhost:8080/context/login` which includes a JSESSIONID cookie that has a path of `/context/`.
+The authenticated user is associated to that session.
+* The browser requests `http://localhost:8080/context` which will not include the JSESSIONID cookie since the path of the cookie is `/context/`
+
++
+
+NOTE: The cookie path has a trailing `/` but the request URL does not
+
+* The `SecurityFilter` will not see the session because the JSESSIONID cookie was not included.
+This means the user is not authenticated and thus not authorized to view `/context`.
+* `SecurityFilter` again saves the request of `/context` to the (new) session.
+The session is new because no JSESSIONID cookie was submitted with the request.
+* `SecurityFitler` sends a redirect to the log in page with a new JSESSIONID cookie since a new session was created to persist the saved request.
+
+=== Requesting `/context/`
+
+This works because the JSESSIONID cookie will be submitted with the request upon successful log in.
+
+* Open http://localhost:8080/context/
+
++
+
+NOTE: There is a trailing `/`
+
+* Press the *Sign In* button
+* The Hello page is displayed
+
+=== Jetty
+
+The application works with Jetty.
+
+----
+$ mvn clean package jetty:run
+----
+
+* Open http://localhost:8080/context
+
++
+
+NOTE: There is no trailing `/`
+
+* Press the *Sign In* button
+* The Hello page is displayed
+
+This works because
+
+* The cookie is written to `/context`
+
++
+
+NOTE: Obviously not ideal to avoid the cookie being submitted to an incorrect URL
+
+* The redirect URL always is `/context/`
+
+== Getting Around the Issue
+
+* Ensure the servlet is not mapped to `/*`.
+By doing this it appears that Tomcat does not invoke our `SecurityFilter` on the request to `/context` but instead handles the redirect to `/context/` outside of the user code.
+This means that the http://localhost:8080/context URL is never saved since `SecurityFilter` never sees it.
+* Configure Tomcat to set `sessionCookiePathUsesTrailingSlash` to `false`.
+See the [Tomcat Docs|https://tomcat.apache.org/tomcat-8.0-doc/config/context.html#Common_Attributes] for how to do this and why it is not a good idea.
